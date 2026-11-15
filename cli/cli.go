@@ -227,8 +227,7 @@ func SetupCommand(
 		},
 		Action: func(_ ctx.Context, cmd *cli.Command) error {
 			context := cmd.Metadata["context"].(*execcontext.Context)
-			ProcessRequests(context)
-			return nil
+			return ProcessRequests(context)
 		},
 	}
 
@@ -236,8 +235,12 @@ func SetupCommand(
 }
 
 // ProcessRequests wires up the request and response workers with channels
-// and asks the parser to start sending requests
-func ProcessRequests(context *execcontext.Context) {
+// and asks the parser to start sending requests. It returns a non-nil error
+// when a fatal body read or stdout write failure stopped publishing.
+func ProcessRequests(context *execcontext.Context) error {
+	// make sure the run's cancellation context is released even on early return
+	defer context.Cancel()
+
 	requestsWithContextChannel := make(chan parser.RequestWithContext, context.RequestWorkers)
 	responsesWithContextChannel := make(chan *responses.ResponseWithContext, context.RequestWorkers)
 
@@ -250,9 +253,9 @@ func ProcessRequests(context *execcontext.Context) {
 	}
 
 	requestWaitGroup := requests.StartRequestWorkers(requestsWithContextChannel, responsesWithContextChannel, rateLimitTicker, context)
-	responseWaitGroup := responses.StartResponseWorkers(responsesWithContextChannel, context)
+	responseWaitGroup, publishController := responses.StartResponseWorkers(responsesWithContextChannel, context)
 
-	err := parser.SendRequests(requestsWithContextChannel, context.In, context.RequestMethod, context.RequestHeaders)
+	err := parser.SendRequests(requestsWithContextChannel, context.In, context.RequestMethod, context.RequestHeaders, context.Ctx.Done())
 
 	if err != nil {
 		context.Logger.LogError(err, "error parsing requests")
@@ -263,4 +266,15 @@ func ProcessRequests(context *execcontext.Context) {
 
 	close(responsesWithContextChannel)
 	responseWaitGroup.Wait()
+
+	// surface any fatal body read / stdout write failure explicitly on
+	// stderr and return it so the process exits non-zero
+	if publishController != nil {
+		if publishErr := publishController.Wait(); publishErr != nil {
+			context.Logger.LogError(publishErr, "stopped publishing responses")
+			return publishErr
+		}
+	}
+
+	return nil
 }

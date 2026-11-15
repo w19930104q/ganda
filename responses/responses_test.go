@@ -2,6 +2,7 @@ package responses
 
 import (
 	"bytes"
+	"encoding/json"
 	"github.com/stretchr/testify/assert"
 	"github.com/tednaleid/ganda/config"
 	"net/http"
@@ -33,6 +34,41 @@ func TestRawOutputJSON(t *testing.T) {
 
 	assert.True(t, mockResponse.BodyClosed())
 	assert.Equal(t, "{ \"url\": \"http://example.com\", \"code\": 200, \"body\": \"hello world\" }", writeCloser.ToString())
+}
+
+// a raw body that contains an embedded newline (or is not standalone valid
+// JSON) must still produce a single-line, independently parseable envelope
+// rather than splitting one record across two stdout lines
+func TestRawOutputJSONWithEmbeddedNewlineIsSingleLine(t *testing.T) {
+	responseFn := determineEmitJsonResponseWithContextFn(config.Raw)
+
+	mockResponse := NewMockResponseBodyOnly("{\"id\":1}\n")
+	out := NewMockWriteCloser()
+
+	_, err := responseFn(&ResponseWithContext{Response: mockResponse.Response}, out)
+	assert.NoError(t, err)
+
+	record := out.ToString()
+	assert.NotContains(t, record, "\n", "envelope must not contain a raw newline")
+
+	var parsed map[string]interface{}
+	assert.NoError(t, json.Unmarshal([]byte(record), &parsed), "whole record must be valid JSON: %q", record)
+	// the embedded newline survives inside the JSON-escaped string body
+	assert.Equal(t, "{\"id\":1}\n", parsed["body"])
+}
+
+func TestRawOutputJSONWithNonJsonBodyIsEscapedString(t *testing.T) {
+	responseFn := determineEmitJsonResponseWithContextFn(config.Raw)
+
+	mockResponse := NewMockResponseBodyOnly("not json at all")
+	out := NewMockWriteCloser()
+
+	_, err := responseFn(&ResponseWithContext{Response: mockResponse.Response}, out)
+	assert.NoError(t, err)
+
+	var parsed map[string]interface{}
+	assert.NoError(t, json.Unmarshal([]byte(out.ToString()), &parsed))
+	assert.Equal(t, "not json at all", parsed["body"])
 }
 
 func TestEscapedOutput(t *testing.T) {

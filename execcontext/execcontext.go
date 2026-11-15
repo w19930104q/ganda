@@ -1,6 +1,7 @@
 package execcontext
 
 import (
+	"context"
 	"fmt"
 	"github.com/tednaleid/ganda/config"
 	"github.com/tednaleid/ganda/logger"
@@ -14,6 +15,10 @@ import (
 type Context struct {
 	BaseDirectory          string
 	BaseRetryDelayDuration time.Duration
+	// Ctx is cancelled when processing must abort (fatal body read or
+	// stdout write failure); Cancel triggers it
+	Ctx                    context.Context
+	Cancel                 context.CancelFunc
 	ConnectTimeoutDuration time.Duration
 	In                     io.Reader
 	Insecure               bool
@@ -34,9 +39,13 @@ type Context struct {
 func New(conf *config.Config, in io.Reader, stderr io.Writer, stdout io.Writer) (*Context, error) {
 	var err error
 
+	runCtx, cancel := context.WithCancel(context.Background())
+
 	context := Context{
 		BaseDirectory:          conf.BaseDirectory,
 		BaseRetryDelayDuration: time.Duration(conf.BaseRetryDelayMillis) * time.Millisecond,
+		Ctx:                    runCtx,
+		Cancel:                 cancel,
 		ConnectTimeoutDuration: time.Duration(conf.ConnectTimeoutMillis) * time.Millisecond,
 		In:                     in,
 		Insecure:               conf.Insecure,
@@ -60,8 +69,10 @@ func New(conf *config.Config, in io.Reader, stderr io.Writer, stdout io.Writer) 
 		context.RequestWorkers = 1
 	}
 
-	// updating to a single response worker for now, need to fix a bug where they aren't sharing stdout properly
-	context.ResponseWorkers = 1
+	// response workers process bodies in parallel; stdout writes are
+	// serialized through a single publisher, so it is safe to have as many
+	// response workers as request workers
+	context.ResponseWorkers = context.RequestWorkers
 
 	if len(conf.RequestFilename) > 0 {
 		// replace stdin with the file

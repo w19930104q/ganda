@@ -26,7 +26,7 @@ func BenchmarkSendUrlsRequests(b *testing.B) {
 			}
 		}()
 
-		SendRequests(ch, input, "GET", headers)
+		SendRequests(ch, input, "GET", headers, nil)
 		close(ch)
 	}
 }
@@ -47,7 +47,7 @@ func BenchmarkSendJsonLinesRequests(b *testing.B) {
 			}
 		}()
 
-		SendRequests(ch, input, "POST", headers)
+		SendRequests(ch, input, "POST", headers, nil)
 		close(ch)
 	}
 }

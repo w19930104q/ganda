@@ -21,7 +21,7 @@ func TestSendGetRequestUrlsHaveDefaultHeaders(t *testing.T) {
 
 	var in = trimmedInputReader(inputLines)
 
-	err := parser.SendRequests(requestsWithContext, in, "GET", []config.RequestHeader{})
+	err := parser.SendRequests(requestsWithContext, in, "GET", []config.RequestHeader{}, nil)
 
 	assert.Nil(t, err, "expected no error")
 
@@ -51,7 +51,7 @@ func TestSendGetRequestUrlsAddGivenHeaders(t *testing.T) {
 
 	requestHeaders := []config.RequestHeader{{Key: "X-Test", Value: "foo"}, {Key: "X-Test2", Value: "bar"}}
 
-	err := parser.SendRequests(requestsWithContext, in, "GET", requestHeaders)
+	err := parser.SendRequests(requestsWithContext, in, "GET", requestHeaders, nil)
 
 	assert.Nil(t, err, "expected no error")
 
@@ -83,7 +83,7 @@ func TestSendRequestsHasRaggedRequestContext(t *testing.T) {
 
 	var in = trimmedInputReader(inputLines)
 
-	parser.SendRequests(requestsWithContext, in, "GET", []config.RequestHeader{})
+	parser.SendRequests(requestsWithContext, in, "GET", []config.RequestHeader{}, nil)
 
 	expectedResults := []struct {
 		url     string
@@ -112,7 +112,7 @@ func TestSendRequestsHasMalformedTSV(t *testing.T) {
 
 	var in = trimmedInputReader(inputLines)
 
-	err := parser.SendRequests(requestsWithContext, in, "GET", []config.RequestHeader{})
+	err := parser.SendRequests(requestsWithContext, in, "GET", []config.RequestHeader{}, nil)
 
 	assert.NotNil(t, err, "expected error")
 	assert.Equal(t, "parse error on line 1, column 65: extraneous or missing \" in quoted-field", err.Error())
@@ -130,7 +130,7 @@ func TestSendJsonLinesRequests(t *testing.T) {
 
 	var in = trimmedInputReader(inputLines)
 
-	err := parser.SendRequests(requestsWithContext, in, "GET", []config.RequestHeader{})
+	err := parser.SendRequests(requestsWithContext, in, "GET", []config.RequestHeader{}, nil)
 	assert.Nil(t, err, "expected no error")
 
 	expectedResults := []struct {
@@ -163,7 +163,7 @@ func TestSendJsonLinesRequestsMissingUrl(t *testing.T) {
 
 	var in = trimmedInputReader(inputLines)
 
-	err := parser.SendRequests(requestsWithContext, in, "GET", []config.RequestHeader{})
+	err := parser.SendRequests(requestsWithContext, in, "GET", []config.RequestHeader{}, nil)
 
 	assert.NotNil(t, err, "expected error")
 	assert.Equal(t, "missing url property: { \"noturl\": \"https://ex.com/bar\", \"context\": [\"foo\", \"quoted content\"] }", err.Error())
@@ -178,7 +178,7 @@ func TestSendJsonLinesRequestsMalformedJson(t *testing.T) {
 
 	var in = trimmedInputReader(inputLines)
 
-	err := parser.SendRequests(requestsWithContext, in, "GET", []config.RequestHeader{})
+	err := parser.SendRequests(requestsWithContext, in, "GET", []config.RequestHeader{}, nil)
 
 	assert.NotNil(t, err, "expected error")
 	assert.Equal(t, "unexpected end of JSON input: { \"url\": \"https://ex.com/bar\", \"context\": [\"foo\", \"quoted content\"]", err.Error())
@@ -194,7 +194,7 @@ func TestSendJsonLinesAddGivenHeaders(t *testing.T) {
 
 	staticHeaders := []config.RequestHeader{{Key: "X-Static", Value: "foo"}}
 
-	err := parser.SendRequests(requestsWithContext, in, "GET", staticHeaders)
+	err := parser.SendRequests(requestsWithContext, in, "GET", staticHeaders, nil)
 
 	assert.Nil(t, err, "expected no error")
 
@@ -220,7 +220,7 @@ func TestSendJsonLinesGivenHeadersOverrideStaticHeaders(t *testing.T) {
 
 	staticHeaders := []config.RequestHeader{{Key: "X-Bar", Value: "foo"}}
 
-	err := parser.SendRequests(requestsWithContext, in, "GET", staticHeaders)
+	err := parser.SendRequests(requestsWithContext, in, "GET", staticHeaders, nil)
 
 	assert.Nil(t, err, "expected no error")
 
@@ -243,7 +243,7 @@ func TestSendJsonLinesStaticHeadersAreNotRequiredToAddHeaders(t *testing.T) {
 
 	var in = trimmedInputReader(inputLines)
 
-	err := parser.SendRequests(requestsWithContext, in, "GET", nil)
+	err := parser.SendRequests(requestsWithContext, in, "GET", nil, nil)
 
 	assert.Nil(t, err, "expected no error")
 
@@ -279,7 +279,7 @@ func TestSendJsonLinesPassesBody(t *testing.T) {
 
 		var in = strings.NewReader(inputLines)
 
-		err := parser.SendRequests(requestsWithContext, in, "GET", nil)
+		err := parser.SendRequests(requestsWithContext, in, "GET", nil, nil)
 
 		assert.Nil(t, err, "expected no error")
 
@@ -300,7 +300,7 @@ func TestEmptyInputReturnsNoError(t *testing.T) {
 	requestsWithContext := make(chan parser.RequestWithContext, 1)
 	defer close(requestsWithContext)
 
-	err := parser.SendRequests(requestsWithContext, strings.NewReader(""), "GET", []config.RequestHeader{})
+	err := parser.SendRequests(requestsWithContext, strings.NewReader(""), "GET", []config.RequestHeader{}, nil)
 
 	assert.Nil(t, err, "empty input should not return an error")
 	assert.Equal(t, 0, len(requestsWithContext), "no requests should be sent")
@@ -312,7 +312,7 @@ func TestMalformedUrlReturnsError(t *testing.T) {
 
 	in := strings.NewReader("://bad-url\n")
 
-	err := parser.SendRequests(requestsWithContext, in, "GET", []config.RequestHeader{})
+	err := parser.SendRequests(requestsWithContext, in, "GET", []config.RequestHeader{}, nil)
 
 	assert.NotNil(t, err, "malformed URL should return an error")
 	assert.Contains(t, err.Error(), "invalid request")
@@ -324,7 +324,7 @@ func TestMalformedJsonLineUrlReturnsError(t *testing.T) {
 
 	in := strings.NewReader(`{"url": "://bad-url"}` + "\n")
 
-	err := parser.SendRequests(requestsWithContext, in, "GET", []config.RequestHeader{})
+	err := parser.SendRequests(requestsWithContext, in, "GET", []config.RequestHeader{}, nil)
 
 	assert.NotNil(t, err, "malformed URL in JSON line should return an error")
 	assert.Contains(t, err.Error(), "invalid request")

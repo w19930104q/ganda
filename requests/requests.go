@@ -66,16 +66,40 @@ func requestWorker(
 	httpClient := NewHttpClient(context)
 
 	for requestWithContext := range requestsWithContext {
-		if rateLimitTicker != nil {
-			<-rateLimitTicker.C // wait for the next tick to send the request
+		// a fatal response-processing error cancels the run; stop pulling
+		// new work and close out any requests still in the channel
+		select {
+		case <-context.Ctx.Done():
+			continue
+		default:
 		}
+
+		if rateLimitTicker != nil {
+			select {
+			case <-rateLimitTicker.C: // wait for the next tick to send the request
+			case <-context.Ctx.Done():
+				continue
+			}
+		}
+
+		// bind the run context so an in-flight request is aborted when the
+		// run shuts down instead of lingering until its own timeout
+		requestWithContext.Request = requestWithContext.Request.WithContext(context.Ctx)
 
 		finalResponse, err := requestWithRetry(httpClient, requestWithContext, context.BaseRetryDelayDuration)
 
 		if err != nil {
 			httpClient.Logger.LogError(err, requestWithContext.Request.URL.String())
 		} else {
-			responsesWithContext <- finalResponse
+			select {
+			case responsesWithContext <- finalResponse:
+			case <-context.Ctx.Done():
+				// nobody is going to consume this response anymore
+				if finalResponse != nil && finalResponse.Response != nil {
+					finalResponse.Response.Body.Close()
+				}
+				return
+			}
 		}
 	}
 }
@@ -118,7 +142,11 @@ func requestWithRetry(
 		if delay > 30*time.Second {
 			delay = 30 * time.Second
 		}
-		time.Sleep(delay)
+		select {
+		case <-time.After(delay):
+		case <-requestWithContext.Request.Context().Done():
+			return nil, requestWithContext.Request.Context().Err()
+		}
 	}
 
 }

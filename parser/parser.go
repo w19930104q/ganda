@@ -27,11 +27,28 @@ type RequestWithContext struct {
 	RequestContext interface{}
 }
 
+// sendRequest hands a parsed request to the workers. It returns false when
+// stop is closed before the request could be handed off, so the caller stops
+// parsing instead of blocking on a dead pipeline
+func sendRequest(requestsWithContext chan<- RequestWithContext, request RequestWithContext, stop <-chan struct{}) bool {
+	if stop == nil {
+		requestsWithContext <- request
+		return true
+	}
+	select {
+	case requestsWithContext <- request:
+		return true
+	case <-stop:
+		return false
+	}
+}
+
 func SendRequests(
 	requestsWithContext chan<- RequestWithContext,
 	in io.Reader,
 	requestMethod string,
 	staticHeaders []config.RequestHeader,
+	stop <-chan struct{},
 ) error {
 	reader := bufio.NewReader(in)
 	inputType, err := determineInputType(reader)
@@ -42,10 +59,10 @@ func SendRequests(
 	}
 
 	if inputType == JsonLines {
-		return SendJsonLinesRequests(requestsWithContext, reader, requestMethod, staticHeaders)
+		return SendJsonLinesRequests(requestsWithContext, reader, requestMethod, staticHeaders, stop)
 	}
 
-	return SendUrlsRequests(requestsWithContext, reader, requestMethod, staticHeaders)
+	return SendUrlsRequests(requestsWithContext, reader, requestMethod, staticHeaders, stop)
 }
 
 // Each line is an URL and optionally some TSV context that can be passed through
@@ -55,6 +72,7 @@ func SendUrlsRequests(
 	reader *bufio.Reader,
 	requestMethod string,
 	staticHeaders []config.RequestHeader,
+	stop <-chan struct{},
 ) error {
 	tsvReader := csv.NewReader(reader)
 	tsvReader.Comma = '\t'
@@ -80,7 +98,10 @@ func SendUrlsRequests(
 				recordContext = nil
 			}
 
-			requestsWithContext <- RequestWithContext{Request: request, RequestContext: recordContext}
+			if !sendRequest(requestsWithContext, RequestWithContext{Request: request, RequestContext: recordContext}, stop) {
+				// run was cancelled while parsing; stop reading input cleanly
+				return nil
+			}
 		}
 	}
 	return nil
@@ -100,6 +121,7 @@ func SendJsonLinesRequests(
 	reader *bufio.Reader,
 	requestMethod string,
 	staticHeaders []config.RequestHeader,
+	stop <-chan struct{},
 ) error {
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, bufio.MaxScanTokenSize), 1024*1024) // 1MB max line size
@@ -132,7 +154,10 @@ func SendJsonLinesRequests(
 		if err != nil {
 			return fmt.Errorf("invalid request for %s: %w", jsonLine.URL, err)
 		}
-		requestsWithContext <- RequestWithContext{Request: request, RequestContext: jsonLine.Context}
+		if !sendRequest(requestsWithContext, RequestWithContext{Request: request, RequestContext: jsonLine.Context}, stop) {
+			// run was cancelled while parsing; stop reading input cleanly
+			return nil
+		}
 	}
 
 	if err := scanner.Err(); err != nil {
